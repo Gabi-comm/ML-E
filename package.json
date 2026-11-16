@@ -1,0 +1,12 @@
+{
+  "name": "ml-e",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n web,engine -c white,gray \"pnpm -C web dev\" \"pnpm engine\"",
+    "engine": "uv run --project server uvicorn mle_server.main:app --app-dir server --host 127.0.0.1 --port 8000",
+    "test": "uv run --project server pytest server/tests -q"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

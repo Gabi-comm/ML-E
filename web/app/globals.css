@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-bg: #000000;
+  --color-fg: #ffffff;
+  --color-dim: #8f8f8f;
+  --color-faint: #5a5a5a;
+  --color-line: #242424;
+  --color-panel: #070707;
+  --color-pos: #7cffb2;
+  --color-neg: #ff5c7a;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  color-scheme: dark;
+  background: #000;
+}
+
+body {
+  background-color: #000;
+  /* the dot grid from the reference video */
+  background-image: radial-gradient(#2a2a2a 1px, transparent 1.2px);
+  background-size: 12px 12px;
+  color: #fff;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+::selection {
+  background: #fff;
+  color: #000;
+}
+
+:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+
+/* small uppercase monospace label used across the app */
+.label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-dim);
+}
+
+.panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+}
+
+.btn {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 7px 12px;
+  border: 1px solid #fff;
+  color: #fff;
+  background: #000;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms, color 120ms;
+}
+.btn:hover:not(:disabled) {
+  background: #fff;
+  color: #000;
+}
+.btn:disabled {
+  border-color: var(--color-faint);
+  color: var(--color-faint);
+  cursor: not-allowed;
+}
+.btn-solid {
+  background: #fff;
+  color: #000;
+}
+.btn-solid:hover:not(:disabled) {
+  background: #000;
+  color: #fff;
+}
+.btn-quiet {
+  border-color: var(--color-line);
+  color: var(--color-dim);
+}
+
+/* a single square pixel, the building block of the theme */
+.px {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: #fff;
+}
+
+@keyframes blink {
+  50% { opacity: 0.25; }
+}
+.blink { animation: blink 1s steps(2) infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .blink { animation: none; }
+}
+
+/* tables printed by pandas in the output panel */
+.mle-html table { border-collapse: collapse; font-family: var(--font-geist-mono), monospace; font-size: 12px; }
+.mle-html th, .mle-html td { border: 1px solid var(--color-line); padding: 4px 8px; text-align: right; }
+.mle-html th { color: var(--color-dim); font-weight: 500; }

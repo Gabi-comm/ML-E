@@ -1,0 +1,7 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    { "name": "ml-e-web", "runtimeExecutable": "pnpm", "runtimeArgs": ["-C", "web", "dev"], "port": 3000 },
+    { "name": "ml-e-engine", "runtimeExecutable": "pnpm", "runtimeArgs": ["engine"], "port": 8000 }
+  ]
+}

@@ -1,0 +1,13 @@
+node_modules/
+.next/
+out/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+.remember/
+workspace/*
+!workspace/lab/
+.DS_Store
