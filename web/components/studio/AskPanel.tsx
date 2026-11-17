@@ -32,7 +32,7 @@ export default function AskPanel({
   error: string;
   onClose: () => void;
 }) {
-  const [ai, setAi] = useState<boolean | null>(null);
+  const [ai, setAi] = useState<"pro" | "api" | false | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [draft, setDraft] = useState("");
   const nextId = useRef(0);
@@ -56,7 +56,7 @@ export default function AskPanel({
     const aboutError = error !== "" && /error|fail|stopped|crash|wrong/i.test(q);
     const seen = aboutError ? error.split("\n")[0] : undefined;
     const entries = searchGlossary(seen ? `${q} ${seen}` : q);
-    const useAi = ai === true;
+    const useAi = ai === "pro" || ai === "api";
     setTurns((all) => [...all, { id, q, entries, seen, waiting: useAi }]);
     setDraft("");
     if (!useAi) return;
@@ -138,7 +138,7 @@ export default function AskPanel({
             {ai === false && (
               <p className="text-dim">
                 {t.entries.length ? "" : "There is no built-in explanation for that yet. "}
-                AI answers are off. To turn them on, add a line <span className="font-mono">ANTHROPIC_API_KEY=…</span> with your own key to a <span className="font-mono">.env</span> file in the project folder, then close and reopen this panel. Each question then costs a small amount on your Anthropic account.
+                AI answers are off. To use your Claude plan, open a terminal, run <span className="font-mono">claude</span> and sign in with your Claude account, then close and reopen this panel.
               </p>
             )}
           </div>
@@ -154,7 +154,7 @@ export default function AskPanel({
           className="mt-1 w-full resize-none border border-line bg-black px-2 py-1.5 text-sm text-white placeholder:text-faint"
         />
         <div className="mt-2 flex items-center justify-between">
-          <span className="label">{ai === null ? "" : ai ? "Built-in + Claude" : "Built-in answers only"}</span>
+          <span className="label">{ai === null ? "" : ai === "pro" ? "Built-in + Claude (your plan)" : ai ? "Built-in + Claude (API key)" : "Built-in answers only"}</span>
           <button type="submit" className="btn btn-solid" disabled={!draft.trim()}>Ask ▸</button>
         </div>
       </form>

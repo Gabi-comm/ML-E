@@ -24,10 +24,13 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 /** Run a lesson step's check next to the variables the code just made. */
 export const checkStep = (check: string, code: string) => post<CheckResult>("/api/check", { check, code });
 
-export async function aiStatus(): Promise<boolean> {
+/** How Claude answers: "pro" (your Claude plan via Claude Code), "api" (your own key), or false (off). */
+export async function aiStatus(): Promise<"pro" | "api" | false> {
   try {
     const response = await fetch(`${ENGINE_HTTP}/api/ask`);
-    return response.ok && (await response.json()).ai === true;
+    if (!response.ok) return false;
+    const body = await response.json();
+    return body.ai === true ? (body.via === "pro" ? "pro" : "api") : false;
   } catch {
     return false;
   }

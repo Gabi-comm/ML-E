@@ -258,7 +258,8 @@ def check_step(body: CheckBody) -> dict[str, Any]:
 
 @app.get("/api/ask")
 def ask_status() -> dict[str, Any]:
-    return {"ai": tutor.available(), "model": tutor.MODEL}
+    via = tutor.backend()
+    return {"ai": via is not None, "via": via, "model": tutor.MODEL}
 
 
 @app.post("/api/ask")

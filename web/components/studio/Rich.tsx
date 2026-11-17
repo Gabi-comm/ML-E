@@ -4,11 +4,13 @@ import { Fragment } from "react";
 function Inline({ text }: { text: string }) {
   return (
     <>
-      {text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g).map((part, i) =>
+      {text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\s][^*\n]*\*)/g).map((part, i) =>
         part.startsWith("`") && part.endsWith("`") && part.length > 1 ? (
           <code key={i} className="border border-line bg-black px-1 font-mono text-[0.92em] text-pos">{part.slice(1, -1)}</code>
         ) : part.startsWith("**") && part.endsWith("**") && part.length > 4 ? (
           <strong key={i} className="font-semibold text-white">{part.slice(2, -2)}</strong>
+        ) : part.startsWith("*") && part.endsWith("*") && part.length > 2 ? (
+          <em key={i}>{part.slice(1, -1)}</em>
         ) : (
           <Fragment key={i}>{part}</Fragment>
         ),

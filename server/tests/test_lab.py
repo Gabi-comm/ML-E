@@ -1,3 +1,5 @@
+import json
+import subprocess
 import types
 
 import pytest
@@ -63,8 +65,49 @@ def test_ask_status_and_errors(client, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     monkeypatch.setattr(tutor.Path, "home", lambda: tutor.Path("/nonexistent-home"))
     monkeypatch.setattr(tutor, "ENV_FILES", [])
-    assert client.get("/api/ask").json()["ai"] is False
+    monkeypatch.setattr(tutor, "_claude_cli", lambda: None)
+    monkeypatch.setattr(tutor, "_pro_cache", (0.0, False))
+    assert client.get("/api/ask").json() == {"ai": False, "via": None, "model": tutor.MODEL}
     assert client.post("/api/ask", json={"question": "  "}, headers=GOOD).status_code == 400
+    assert "not set up" in client.post("/api/ask", json={"question": "hi"}, headers=GOOD).json()["detail"]
+
+
+def fake_cli(monkeypatch, *, status: dict, reply: dict):
+    """Stand in for the Claude Code CLI: `auth status` returns `status`, `-p` returns `reply`."""
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        out = status if command[1:3] == ["auth", "status"] else reply
+        return types.SimpleNamespace(stdout=json.dumps(out), stderr="", returncode=0)
+
+    monkeypatch.setattr(tutor, "_has_api_credentials", lambda: False)
+    monkeypatch.setattr(tutor, "_claude_cli", lambda: "claude")
+    monkeypatch.setattr(tutor, "_pro_cache", (0.0, False))
+    monkeypatch.setattr(tutor, "subprocess", types.SimpleNamespace(
+        run=run, TimeoutExpired=subprocess.TimeoutExpired, SubprocessError=subprocess.SubprocessError))
+    return calls
+
+
+def test_ask_through_claude_plan(client, monkeypatch):
+    calls = fake_cli(monkeypatch, status={"loggedIn": True, "authMethod": "claude.ai"},
+                     reply={"is_error": False, "result": "ReLU keeps positives.", "stop_reason": "end_turn"})
+    assert client.get("/api/ask").json()["via"] == "pro"
+    body = {"question": "what is relu", "code": "x = 1", "context": "Step 4", "history": [{"q": "what is dense", "a": "A layer."}]}
+    response = client.post("/api/ask", json=body, headers=GOOD)
+    assert response.status_code == 200 and response.json() == {"answer": "ReLU keeps positives."}
+    command, kwargs = calls[-1]
+    assert command[command.index("--tools") + 1] == ""          # it can only answer, never act
+    assert "--system-prompt" in command and "ANTHROPIC_API_KEY" not in kwargs["env"]
+    assert "what is dense" in kwargs["input"] and kwargs["input"].endswith("Question: what is relu")
+
+
+def test_claude_plan_errors_are_friendly(client, monkeypatch):
+    fake_cli(monkeypatch, status={"loggedIn": True, "authMethod": "claude.ai"},
+             reply={"is_error": True, "result": "Claude usage limit reached"})
+    assert "usage limit" in client.post("/api/ask", json={"question": "x"}, headers=GOOD).json()["detail"]
+    fake_cli(monkeypatch, status={"loggedIn": False}, reply={})
+    assert client.get("/api/ask").json()["ai"] is False
 
 
 def test_env_file_supplies_the_key(tmp_path, monkeypatch):
@@ -94,6 +137,7 @@ def test_ask_sends_context_and_returns_text(client, monkeypatch):
 
     fake = types.SimpleNamespace(beta=types.SimpleNamespace(messages=FakeMessages()))
     monkeypatch.setattr(tutor, "_client", lambda: fake)
+    monkeypatch.setattr(tutor, "backend", lambda: "api")
     body = {"question": "what is relu", "code": "layers.Dense(8, activation='relu')", "context": "Step 4",
             "error": "", "history": [{"q": "what is dense", "a": "A layer."}]}
     response = client.post("/api/ask", json=body, headers=GOOD)
@@ -108,6 +152,7 @@ def test_ask_refusal_is_reported(client, monkeypatch):
     fake = types.SimpleNamespace(beta=types.SimpleNamespace(messages=types.SimpleNamespace(
         create=lambda **_: types.SimpleNamespace(stop_reason="refusal", content=[]))))
     monkeypatch.setattr(tutor, "_client", lambda: fake)
+    monkeypatch.setattr(tutor, "backend", lambda: "api")
     response = client.post("/api/ask", json={"question": "x"}, headers=GOOD)
     assert response.status_code == 400 and "declined" in response.json()["detail"]
 
