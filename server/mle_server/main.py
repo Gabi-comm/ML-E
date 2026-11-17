@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from . import files, projects
+from . import analytics, files, projects
 from .kernel import KernelSession
 from .parse import parse_model
 
@@ -182,6 +182,42 @@ def project_notebook(pid: str) -> Response:
     notebook = _project_call(lambda: projects.notebook(pid))
     return Response(json.dumps(notebook, indent=1), media_type="application/x-ipynb+json",
                     headers={"content-disposition": f'attachment; filename="{pid}-kaggle.ipynb"'})
+
+
+# -- analytics ---------------------------------------------------------------
+class ProjectRun(BaseModel):
+    project: str
+    model: str
+    split: str = "held-out"
+
+
+@app.get("/api/analytics")
+def analytics_list() -> dict[str, Any]:
+    return {"reports": analytics.list_all(), "projects": analytics.sources()}
+
+
+@app.post("/api/analytics/project")
+def analytics_project(body: ProjectRun) -> dict[str, Any]:
+    return _project_call(lambda: analytics.from_project(body.project, body.model, body.split))
+
+
+@app.post("/api/analytics/upload")
+def analytics_upload(model: UploadFile = File(...), data: UploadFile = File(...), helpers: list[UploadFile] = File(default=[]),
+                     name: str = Form(default=""), target: str = Form(default="")) -> dict[str, Any]:
+    return _project_call(lambda: analytics.from_upload(
+        name, (model.filename or "", model.file), [(h.filename or "", h.file) for h in helpers],
+        (data.filename or "", data.file), target))
+
+
+@app.get("/api/analytics/{rid}")
+def analytics_get(rid: str) -> dict[str, Any]:
+    return _project_call(lambda: analytics.get(rid))
+
+
+@app.delete("/api/analytics/{rid}")
+def analytics_delete(rid: str) -> dict[str, Any]:
+    _project_call(lambda: analytics.delete(rid))
+    return {"ok": True}
 
 
 @app.websocket("/ws/kernel")
