@@ -12,7 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from . import analytics, files, projects
+from mle.tasks import MARK
+
+from . import analytics, files, projects, tutor
 from .kernel import KernelSession
 from .parse import parse_model
 
@@ -218,6 +220,53 @@ def analytics_get(rid: str) -> dict[str, Any]:
 def analytics_delete(rid: str) -> dict[str, Any]:
     _project_call(lambda: analytics.delete(rid))
     return {"ok": True}
+
+
+# -- lab lessons and questions -------------------------------------------------
+class CheckBody(BaseModel):
+    check: str
+    code: str = ""
+
+
+class Question(BaseModel):
+    question: str
+    code: str = ""
+    context: str = ""
+    error: str = ""
+    history: list[dict[str, str]] = []
+
+
+@app.post("/api/check")
+def check_step(body: CheckBody) -> dict[str, Any]:
+    """Run a lesson step's check next to the variables the learner's code just made."""
+    import json
+
+    snippet = f"import mle.tasks as _mle_t\n_mle_t.check({body.check!r}, {body.code!r})\ndel _mle_t"
+    output, problem = "", None
+    for message in session.execute(snippet):
+        if message["type"] == "stream":
+            output += message["text"]
+        elif message["type"] == "error":
+            problem = message["evalue"]
+    for line in output.splitlines():
+        if line.startswith(MARK):
+            return json.loads(line[len(MARK):])
+    if problem == "Code is already running. Stop it first.":
+        return {"ok": False, "message": "Your code is still running. Wait for it to finish, then check again."}
+    return {"ok": False, "message": f"The check could not run{f': {problem}' if problem else ''}."}
+
+
+@app.get("/api/ask")
+def ask_status() -> dict[str, Any]:
+    return {"ai": tutor.available(), "model": tutor.MODEL}
+
+
+@app.post("/api/ask")
+def ask(body: Question) -> dict[str, Any]:
+    try:
+        return {"answer": tutor.ask(body.question, body.code, body.context, body.error, body.history)}
+    except tutor.TutorError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.websocket("/ws/kernel")

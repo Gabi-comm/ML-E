@@ -33,20 +33,39 @@ export default function CodeEditor({
   onChange,
   onCursorLine,
   onRun,
+  onAsk,
 }: {
   value: string;
   onChange: (value: string) => void;
   onCursorLine: (line: number) => void;
   onRun: () => void;
+  onAsk?: (code: string) => void;
 }) {
   const run = useRef(onRun);
+  const ask = useRef(onAsk);
   useEffect(() => {
     run.current = onRun;
-  }, [onRun]);
+    ask.current = onAsk;
+  }, [onRun, onAsk]);
 
   const onMount: OnMount = (editor, monaco) => {
     editor.onDidChangeCursorPosition((event) => onCursorLine(event.position.lineNumber));
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => run.current());
+    // right-click (or Ctrl+I) on code to ask what it means: the selection, or the whole line
+    editor.addAction({
+      id: "mle.ask",
+      label: "Ask ML-E about this",
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyI],
+      contextMenuGroupId: "navigation",
+      contextMenuOrder: 0,
+      run: (ed) => {
+        const model = ed.getModel();
+        const selection = ed.getSelection();
+        if (!model || !selection) return;
+        const picked = model.getValueInRange(selection).trim() || model.getLineContent(selection.startLineNumber).trim();
+        if (picked) ask.current?.(picked.slice(0, 600));
+      },
+    });
   };
 
   return (

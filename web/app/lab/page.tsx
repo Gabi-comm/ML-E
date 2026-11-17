@@ -1,7 +1,7 @@
-import Studio from "@/components/studio/Studio";
+import LabClient from "@/components/studio/LabClient";
 
 export const metadata = { title: "Lab · ML-E" };
 
 export default function Lab() {
-  return <Studio file="lab/main.py" />;
+  return <LabClient />;
 }

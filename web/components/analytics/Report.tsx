@@ -385,12 +385,12 @@ function Compare({ report }: { report: ReportData }) {
   useEffect(() => {
     let alive = true;
     listAnalytics()
-      .then((result) => alive && setOthers(result.reports.filter((r) => r.id !== report.id && r.task === report.task)))
+      .then((result) => alive && setOthers(result.reports.filter((r) => r.id !== report.id && r.task === report.task && r.kind === report.kind)))
       .catch((e: Error) => alive && setError(e.message));
     return () => {
       alive = false;
     };
-  }, [report.id, report.task]);
+  }, [report.id, report.task, report.kind]);
 
   useEffect(() => {
     if (!otherId) return;

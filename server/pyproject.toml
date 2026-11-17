@@ -3,6 +3,7 @@ name = "mle-server"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "anthropic>=2.9.0",
     "fastapi>=0.163.1",
     "ipykernel>=7.4.0",
     "jupyter-client>=8.10.0",

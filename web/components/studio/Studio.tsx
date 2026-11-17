@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   loadFile,
   parseCode,
@@ -12,6 +12,9 @@ import {
   type Layer,
 } from "@/lib/engine";
 import { EXAMPLES } from "@/lib/examples";
+import type { Lesson } from "@/lib/lessons";
+import { checkStep, type CheckResult } from "@/lib/tutor";
+import AskPanel from "./AskPanel";
 import LossChart, { type Series } from "./LossChart";
 
 const CodeEditor = dynamic(() => import("./CodeEditor"), {
@@ -19,6 +22,8 @@ const CodeEditor = dynamic(() => import("./CodeEditor"), {
   loading: () => <p className="label p-3">Loading editor…</p>,
 });
 const Network3D = dynamic(() => import("./Network3D"), { ssr: false });
+// reads saved lesson progress from the browser, so it renders only on the client
+const TaskPanel = dynamic(() => import("./TaskPanel"), { ssr: false });
 
 const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
 const MAX_CONSOLE = 60_000;
@@ -42,9 +47,14 @@ function push(series: Series, name: string, x: number, y: number): Series {
  * `cwd` is the workspace folder the code runs in; `heightClass` sets its height on wide screens.
  */
 export default function Studio({
-  file, cwd = "", heightClass = "lg:h-[calc(100dvh-3rem)]",
-}: { file: string; cwd?: string; heightClass?: string }) {
-  const [code, setCode] = useState(EXAMPLES[0].code);
+  file, cwd = "", heightClass = "lg:h-[calc(100dvh-3rem)]", lesson, toolbar,
+}: { file: string; cwd?: string; heightClass?: string; lesson?: Lesson; toolbar?: ReactNode }) {
+  const [code, setCode] = useState(lesson?.starter ?? EXAMPLES[0].code);
+  const [askOpen, setAskOpen] = useState(false);
+  const [askSeed, setAskSeed] = useState<{ text: string; n: number } | null>(null);
+  const [lastError, setLastError] = useState("");
+  // a "Run & check" in progress: its check runs once the code finishes
+  const pending = useRef<{ check: string; code: string; failed: boolean; resolve: (r: CheckResult) => void } | null>(null);
   const [parsed, setParsed] = useState<Layer[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
   const [live, setLive] = useState<Layer[] | null>(null);
@@ -69,9 +79,13 @@ export default function Studio({
         case "stream":
           append(message.text);
           break;
-        case "error":
-          append(`\n${message.traceback.length ? message.traceback.join("\n") : `${message.ename}: ${message.evalue}`}\n`);
+        case "error": {
+          const shown = message.traceback.length ? message.traceback.join("\n") : `${message.ename}: ${message.evalue}`;
+          append(`\n${shown}\n`);
+          setLastError(`${message.ename}: ${message.evalue}\n${shown.replace(ANSI, "")}`.slice(-3000));
+          if (pending.current) pending.current.failed = true;
           break;
+        }
         case "image":
           setOutputs((o) => [...o, { id: ++outputId.current, kind: "image", png: message.png }]);
           setTab("output");
@@ -80,9 +94,19 @@ export default function Studio({
           setOutputs((o) => [...o, { id: ++outputId.current, kind: "html", html: message.html }]);
           setTab("output");
           break;
-        case "done":
+        case "done": {
           setTraining(false);
+          const job = pending.current;
+          pending.current = null;
+          if (job?.failed) {
+            job.resolve({ ok: false, error: true, message: "Your code stopped with an error before it could be checked. Read the red text in the Console, or ask about it." });
+          } else if (job) {
+            checkStep(job.check, job.code)
+              .then(job.resolve)
+              .catch((e: Error) => job.resolve({ ok: false, message: e.message }));
+          }
           break;
+        }
         case "mle": {
           const event = message.event;
           const mapWeights = (list: { layer: number; w: number[][] }[]) =>
@@ -176,9 +200,28 @@ export default function Studio({
     setWeights({});
     setLive(null);
     setProgress(null);
+    setLastError("");
     void saveFile(file, code);
     engine.run(code, cwd);
   }, [engine, code, file, cwd]);
+
+  const runAndCheck = useCallback(
+    (check: string) =>
+      new Promise<CheckResult>((resolve) => {
+        if (engine.state !== "idle") {
+          resolve({ ok: false, message: "The engine is busy or offline. Wait until it says Ready, then check again." });
+          return;
+        }
+        pending.current = { check, code, failed: false, resolve };
+        run();
+      }),
+    [engine.state, code, run],
+  );
+
+  const askAbout = useCallback((text: string) => {
+    setAskSeed((previous) => ({ text, n: (previous?.n ?? 0) + 1 }));
+    setAskOpen(true);
+  }, []);
 
   const layers = live ?? parsed;
   const lossSeries = Object.fromEntries(Object.entries(series).filter(([k]) => k.includes("loss")));
@@ -187,7 +230,7 @@ export default function Studio({
   const totalParams = layers.reduce((sum, l) => sum + (l.params ?? 0), 0);
 
   return (
-    <div className={`flex min-h-0 flex-1 flex-col ${heightClass}`}>
+    <div className={`flex min-h-0 flex-1 flex-col lg:flex-none ${heightClass}`}>
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-black px-3 py-2">
         <button className="btn btn-solid" onClick={run} disabled={engine.state !== "idle"} title="Ctrl+Enter">
           ▶ Run
@@ -198,6 +241,8 @@ export default function Studio({
         <button className="btn btn-quiet" onClick={engine.restart} disabled={!online || engine.state === "starting"}>
           Restart
         </button>
+        {toolbar}
+        {!lesson && (
         <label className="ml-1 flex items-center gap-2">
           <span className="label hidden sm:inline">Example</span>
           <select
@@ -218,6 +263,10 @@ export default function Studio({
             ))}
           </select>
         </label>
+        )}
+        <button className={`btn ${askOpen ? "btn-solid" : ""}`} onClick={() => setAskOpen(!askOpen)} aria-expanded={askOpen}>
+          ? Ask
+        </button>
         <span className="ml-auto flex items-center gap-2 font-mono text-xs uppercase tracking-wider" role="status">
           <span
             className={`px ${engine.state === "busy" || engine.state === "starting" ? "blink" : ""}`}
@@ -229,15 +278,21 @@ export default function Studio({
         </span>
       </div>
 
-      <div className="grid min-h-0 flex-1 lg:grid-cols-2">
+      <div className="relative grid min-h-0 flex-1 lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)]">
         {/* left: IDE */}
         <section className="flex min-h-0 flex-col border-line lg:border-r" aria-label="Code">
           <div className="flex items-center justify-between border-b border-line px-3 py-1">
             <span className="label">{file}</span>
             {parseError && <span className="truncate pl-3 font-mono text-[11px] text-neg">{parseError}</span>}
           </div>
-          <div className="h-[50vh] min-h-0 lg:h-auto lg:flex-1">
-            <CodeEditor value={code} onChange={edit} onCursorLine={setCursorLine} onRun={run} />
+          {lesson && (
+            <TaskPanel
+              lesson={lesson} canRun={engine.state === "idle"} onCheck={runAndCheck}
+              onAsk={askAbout} onReset={() => edit(lesson.starter)}
+            />
+          )}
+          <div className="h-[50vh] min-h-0 overflow-hidden lg:h-auto lg:flex-1">
+            <CodeEditor value={code} onChange={edit} onCursorLine={setCursorLine} onRun={run} onAsk={(picked) => askAbout(`What does \`${picked}\` do?`)} />
           </div>
           <div className="flex h-44 shrink-0 flex-col border-t border-line">
             <span className="label px-3 pt-2">Console</span>
@@ -329,7 +384,25 @@ export default function Studio({
             )}
           </div>
         </section>
+
+        {askOpen && (
+          <AskPanel
+            seed={askSeed} code={code} error={lastError} onClose={() => setAskOpen(false)}
+            context={lesson ? stepContext(lesson) : ""}
+          />
+        )}
       </div>
     </div>
   );
+}
+
+/** The step the learner is on (as saved by the task card), described for the tutor. */
+function stepContext(lesson: Lesson): string {
+  let index = 0;
+  try {
+    const saved = JSON.parse(localStorage.getItem(`mle:lesson:${lesson.id}`) ?? "{}").step;
+    if (Number.isInteger(saved) && saved >= 0 && saved < lesson.steps.length) index = saved;
+  } catch {}
+  const step = lesson.steps[index];
+  return `Lesson: ${lesson.title}\nStep ${index + 1} of ${lesson.steps.length}: ${step.title}\nTask: ${step.task}`;
 }
