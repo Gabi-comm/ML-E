@@ -1,8 +1,8 @@
 "use client";
 
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html, OrbitControls } from "@react-three/drei";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { OrbitControls } from "@react-three/drei";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import type { Layer } from "@/lib/engine";
 
@@ -104,9 +104,9 @@ function Connections({ from, to, weights }: { from: Placed; to: Placed; weights?
         const w = weights?.[i]?.[j];
         if (typeof w === "number" && peak > 0) {
           const strength = Math.pow(Math.abs(w) / peak, 1.5);
-          color.copy(w >= 0 ? POS : NEG).multiplyScalar(0.06 + 0.94 * strength);
+          color.copy(w >= 0 ? POS : NEG).multiplyScalar(0.03 + 0.72 * strength);
         } else {
-          color.setScalar(0.16);
+          color.setScalar(0.045);
         }
         colors.push(color.r, color.g, color.b, color.r, color.g, color.b);
       });
@@ -128,38 +128,79 @@ function Connections({ from, to, weights }: { from: Placed; to: Placed; weights?
 
 function Label({ placed, active }: { placed: Placed; active: boolean }) {
   const { layer, real, sized } = placed;
+  const lines = useMemo(() => {
+    const out = [layer.type.toUpperCase()];
+    if (sized) {
+      const count = real! > MAX_NODES ? `${MAX_NODES} OF ${real!.toLocaleString()}` : String(real);
+      out.push(layer.shape && layer.shape.length > 1 ? `${count} · ${layer.shape.join("×")}` : count);
+    }
+    if (layer.activation) out.push(layer.activation.toUpperCase());
+    if (typeof layer.params === "number" && layer.params > 0) out.push(`${layer.params.toLocaleString()} PARAMS`);
+    return out;
+  }, [layer, real, sized]);
+
+  // labels are drawn to a small canvas and shown as a sprite, so they live inside the 3D scene
+  const { texture, aspect } = useMemo(() => {
+    const scale = 4;
+    const lineHeight = 15;
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d")!;
+    const font = `500 11px ui-monospace, "Cascadia Mono", Consolas, monospace`;
+    ctx.font = font;
+    const width = Math.ceil(Math.max(...lines.map((l) => ctx.measureText(l).width)) + 12);
+    const height = lines.length * lineHeight + 4;
+    canvas.width = width * scale;
+    canvas.height = height * scale;
+    ctx.scale(scale, scale);
+    ctx.font = font;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    lines.forEach((line, i) => {
+      const y = 2 + lineHeight * (i + 0.5);
+      if (i === 0 && active) {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 2, width, lineHeight);
+        ctx.fillStyle = "#000000";
+      } else {
+        ctx.fillStyle = active ? "#ffffff" : i === 0 ? "#d0d0d0" : "#8f8f8f";
+      }
+      ctx.fillText(line, width / 2, y + 0.5);
+    });
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return { texture: tex, aspect: width / height };
+  }, [lines, active]);
+
+  useEffect(() => () => texture.dispose(), [texture]);
+
   const rows = sized ? Math.ceil(placed.nodes.length / Math.ceil(Math.sqrt(placed.nodes.length))) : 3;
-  const y = -((rows - 1) / 2) * SPACING - 0.55;
+  const height = 0.3 * lines.length + 0.08;
+  const y = -((rows - 1) / 2) * SPACING - 0.4 - height / 2;
   return (
-    <Html position={[placed.x, y, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-      <div
-        className={`mt-6 whitespace-nowrap text-center font-mono text-[10px] uppercase leading-tight tracking-wider ${
-          active ? "text-white" : "text-dim"
-        }`}
-      >
-        <div className={active ? "bg-white px-1 text-black" : ""}>{layer.type}</div>
-        {sized && (
-          <div>
-            {real! > MAX_NODES ? `${MAX_NODES} of ${real!.toLocaleString()}` : real}
-            {layer.shape && layer.shape.length > 1 ? ` · ${layer.shape.join("×")}` : ""}
-          </div>
-        )}
-        {layer.activation && <div>{layer.activation}</div>}
-        {typeof layer.params === "number" && layer.params > 0 && <div>{layer.params.toLocaleString()} params</div>}
-      </div>
-    </Html>
+    <sprite position={[placed.x, y, 0]} scale={[height * aspect, height, 1]}>
+      <spriteMaterial map={texture} transparent depthWrite={false} />
+    </sprite>
   );
 }
 
 function FitCamera({ count }: { count: number }) {
-  const { camera, size } = useThree();
+  const camera = useThree((state) => state.camera);
+  const width = useThree((state) => state.size.width);
+  const height = useThree((state) => state.size.height);
+  const controls = useThree((state) => state.controls) as { target: THREE.Vector3; update: () => void } | null;
   useEffect(() => {
+    if (width < 2 || height < 2) return; // canvas not laid out yet
     const span = Math.max(1, count - 1) * GAP + 3;
-    const aspect = size.width / Math.max(1, size.height);
-    const distance = Math.max(5, span / (2 * Math.tan((50 * Math.PI) / 360) * aspect) + 1.5);
+    const aspect = width / height;
+    const distance = Math.max(5, (span / (2 * Math.tan((50 * Math.PI) / 360) * aspect)) * 0.9 + 1);
     camera.position.set(-distance * 0.35, distance * 0.3, distance * 0.92);
     camera.lookAt(0, 0, 0);
-  }, [camera, count, size.width, size.height]);
+    if (controls) {
+      controls.target.set(0, 0, 0);
+      controls.update();
+    }
+  }, [camera, controls, count, width, height]);
   return null;
 }
 
@@ -175,6 +216,19 @@ export default function Network3D({
   training: boolean;
 }) {
   const placed = useMemo(() => place(layers), [layers]);
+
+  // The canvas measures its container once on mount and can miss it in React's
+  // development double-mount, leaving a blank view. Nudge it to measure again.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const timers = [50, 400].map((ms) =>
+      setTimeout(() => {
+        setTick((t) => t + 1);
+        window.dispatchEvent(new Event("resize"));
+      }, ms),
+    );
+    return () => timers.forEach(clearTimeout);
+  }, []);
   const sized = placed.filter((p) => p.sized);
 
   return (

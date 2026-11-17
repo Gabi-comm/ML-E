@@ -37,7 +37,13 @@ function push(series: Series, name: string, x: number, y: number): Series {
   return { ...series, [name]: [...(series[name] ?? []), [x, y]] };
 }
 
-export default function Studio({ file }: { file: string }) {
+/**
+ * The split-screen workbench: code on the left, live visualisation on the right.
+ * `cwd` is the workspace folder the code runs in; `heightClass` sets its height on wide screens.
+ */
+export default function Studio({
+  file, cwd = "", heightClass = "lg:h-[calc(100dvh-3rem)]",
+}: { file: string; cwd?: string; heightClass?: string }) {
   const [code, setCode] = useState(EXAMPLES[0].code);
   const [parsed, setParsed] = useState<Layer[]>([]);
   const [parseError, setParseError] = useState<string | null>(null);
@@ -107,10 +113,21 @@ export default function Studio({ file }: { file: string }) {
   const engine = useEngine(onMessage);
   const online = engine.state !== "offline";
 
-  // open the saved file once the engine is reachable
+  // code sent over from a Books scene wins; otherwise open the saved file
   const loaded = useRef(false);
   useEffect(() => {
-    if (!online || loaded.current) return;
+    if (loaded.current) return;
+    let handoff: string | null = null;
+    try {
+      handoff = sessionStorage.getItem("mle:lab-code");
+      sessionStorage.removeItem("mle:lab-code");
+    } catch {}
+    if (handoff) {
+      loaded.current = true;
+      setCode(handoff);
+      return;
+    }
+    if (!online) return;
     loaded.current = true;
     loadFile(file).then((saved) => {
       if (saved !== null && saved.trim() !== "") setCode(saved);
@@ -160,8 +177,8 @@ export default function Studio({ file }: { file: string }) {
     setLive(null);
     setProgress(null);
     void saveFile(file, code);
-    engine.run(code);
-  }, [engine, code, file]);
+    engine.run(code, cwd);
+  }, [engine, code, file, cwd]);
 
   const layers = live ?? parsed;
   const lossSeries = Object.fromEntries(Object.entries(series).filter(([k]) => k.includes("loss")));
@@ -170,7 +187,7 @@ export default function Studio({ file }: { file: string }) {
   const totalParams = layers.reduce((sum, l) => sum + (l.params ?? 0), 0);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col lg:h-[calc(100dvh-3rem)]">
+    <div className={`flex min-h-0 flex-1 flex-col ${heightClass}`}>
       <div className="flex flex-wrap items-center gap-2 border-b border-line bg-black px-3 py-2">
         <button className="btn btn-solid" onClick={run} disabled={engine.state !== "idle"} title="Ctrl+Enter">
           ▶ Run

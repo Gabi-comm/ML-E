@@ -47,3 +47,6 @@ export const BOOKS: Book[] = [
     ],
   },
 ];
+
+/** chapters whose scenes are built (keys match lib/scenes.tsx) */
+export const BUILT = new Set(["homl-1", "homl-2", "homl-3", "homl-4", "homl-5", "homl-6", "homl-7", "homl-8", "homl-9", "homl-10", "homl-11", "homl-12", "homl-13", "homl-14", "homl-15", "homl-16", "homl-17", "homl-18", "homl-19", "aie-1", "aie-2", "aie-3", "aie-4", "aie-5", "aie-6", "aie-7", "aie-8", "aie-9", "aie-10"]);

@@ -7,12 +7,12 @@ import threading
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
-from . import files
+from . import files, projects
 from .kernel import KernelSession
 from .parse import parse_model
 
@@ -22,8 +22,18 @@ ALLOWED_HOSTS = {"127.0.0.1:8000", "localhost:8000", "testserver"}
 session = KernelSession(warm=os.environ.get("MLE_NO_WARM") != "1")
 
 
+def _prewarm() -> None:
+    try:
+        session.start()
+    except Exception:
+        pass  # the first Lab connection will retry and report the error
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    # Start warming the Python kernel now so the Lab is ready sooner.
+    if os.environ.get("MLE_NO_PREWARM") != "1":
+        threading.Thread(target=_prewarm, daemon=True).start()
     yield
     await asyncio.to_thread(session.shutdown)
 
@@ -88,6 +98,92 @@ def write_file(body: FileBody) -> dict[str, Any]:
     return {"ok": True}
 
 
+# -- projects ----------------------------------------------------------------
+class NewProject(BaseModel):
+    name: str
+    kind: str
+
+
+class Starter(BaseModel):
+    target: str | None = None
+    template: str = "network"
+
+
+def _project_call(action):
+    try:
+        return action()
+    except projects.ProjectError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/projects")
+def project_list() -> dict[str, Any]:
+    return {"projects": projects.list_all()}
+
+
+@app.post("/api/projects")
+def project_create(body: NewProject) -> dict[str, Any]:
+    return _project_call(lambda: projects.create(body.name, body.kind))
+
+
+@app.get("/api/projects/{pid}")
+def project_get(pid: str) -> dict[str, Any]:
+    return _project_call(lambda: {"project": projects.get(pid), "summary": projects.summary(pid)})
+
+
+@app.post("/api/projects/{pid}/upload")
+def project_upload(pid: str, uploads: list[UploadFile] = File(...), paths: list[str] = Form(default=[])) -> dict[str, Any]:
+    """CSV projects take one .csv. Image projects take one .zip, or image files with their folder paths."""
+    def work() -> dict[str, Any]:
+        kind = projects.get(pid)["kind"]
+        saved, skipped = 0, 0
+        if kind == "csv":
+            projects.save_csv(pid, uploads[0].filename or "data.csv", uploads[0].file)
+            saved = 1
+        elif len(uploads) == 1 and (uploads[0].filename or "").lower().endswith(".zip"):
+            saved = projects.save_images_zip(pid, uploads[0].file)
+        else:
+            for index, upload in enumerate(uploads):
+                relative = paths[index] if index < len(paths) else (upload.filename or "")
+                try:
+                    projects.save_image(pid, relative, upload.file)
+                    saved += 1
+                except projects.ProjectError:
+                    skipped += 1
+            if saved == 0:
+                raise projects.ProjectError(
+                    "no images saved. Choose a folder that contains one sub-folder per class, e.g. cats/ and dogs/")
+        return {"saved": saved, "skipped": skipped, "project": projects.get(pid), "summary": projects.summary(pid)}
+
+    return _project_call(work)
+
+
+@app.get("/api/projects/{pid}/image")
+def project_image(pid: str, path: str) -> FileResponse:
+    return FileResponse(_project_call(lambda: projects.image_path(pid, path)))
+
+
+@app.post("/api/projects/{pid}/starter")
+def project_starter(pid: str, body: Starter) -> dict[str, Any]:
+    return _project_call(lambda: {"code": projects.write_starter(pid, body.target, body.template), "project": projects.get(pid)})
+
+
+@app.get("/api/projects/{pid}/export")
+def project_export(pid: str) -> StreamingResponse:
+    buffer = _project_call(lambda: projects.export_zip(pid))
+    return StreamingResponse(buffer, media_type="application/zip",
+                             headers={"content-disposition": f'attachment; filename="{pid}.zip"'})
+
+
+@app.get("/api/projects/{pid}/notebook")
+def project_notebook(pid: str) -> Response:
+    import json
+
+    notebook = _project_call(lambda: projects.notebook(pid))
+    return Response(json.dumps(notebook, indent=1), media_type="application/x-ipynb+json",
+                    headers={"content-disposition": f'attachment; filename="{pid}-kaggle.ipynb"'})
+
+
 @app.websocket("/ws/kernel")
 async def kernel_socket(ws: WebSocket) -> None:
     if ws.headers.get("origin") not in ALLOWED_ORIGINS or ws.headers.get("host") not in ALLOWED_HOSTS:
@@ -110,9 +206,15 @@ async def kernel_socket(ws: WebSocket) -> None:
             put({"type": "error", "ename": "EngineStartFailed", "evalue": str(exc), "traceback": []})
         status()
 
-    def run(code: str) -> None:
+    def run(code: str, folder: str) -> None:
         put({"type": "status", "state": "busy"})
         try:
+            # Every run starts in a known folder: the workspace, or a project inside it.
+            where = files.safe_path(folder) if folder else files.root()
+            where.mkdir(parents=True, exist_ok=True)
+            for message in session.execute(f"import os as _mle_os; _mle_os.chdir({str(where)!r}); del _mle_os"):
+                if message["type"] == "error":
+                    put(message)
             for message in session.execute(code):
                 put(message)
         except Exception as exc:
@@ -140,7 +242,8 @@ async def kernel_socket(ws: WebSocket) -> None:
             message = await ws.receive_json()
             kind = message.get("type")
             if kind == "execute" and isinstance(message.get("code"), str):
-                threading.Thread(target=run, args=(message["code"],), daemon=True).start()
+                folder = message.get("cwd") if isinstance(message.get("cwd"), str) else ""
+                threading.Thread(target=run, args=(message["code"], folder), daemon=True).start()
             elif kind == "interrupt":
                 await asyncio.to_thread(session.interrupt)
             elif kind == "restart":

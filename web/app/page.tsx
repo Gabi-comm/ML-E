@@ -2,9 +2,9 @@ import Link from "next/link";
 import BloomHero from "@/components/BloomHero";
 
 const SECTIONS = [
-  { href: "/books", n: "02", name: "Books", text: "Both books, chapter by chapter, as short interactive scenes instead of pages.", status: "Chapter map ready · scenes next" },
+  { href: "/books", n: "02", name: "Books", text: "Both books, chapter by chapter, as short interactive scenes instead of pages.", status: "29 chapters · 103 scenes" },
   { href: "/lab", n: "03", name: "Lab", text: "Write Python on the left. Watch the network, loss and outputs appear on the right.", status: "Working" },
-  { href: "/projects", n: "04", name: "Projects", text: "Bring your own images or CSV, build a model, train it here or on Kaggle's GPU.", status: "Not built yet" },
+  { href: "/projects", n: "04", name: "Projects", text: "Bring your own images or CSV, build a model, train it here or export it for Kaggle's GPU.", status: "Working" },
   { href: "/analytics", n: "05", name: "Analytics", text: "Upload a trained model and see where it is right, wrong and why.", status: "Not built yet" },
 ];
 

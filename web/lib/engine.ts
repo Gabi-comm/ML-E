@@ -118,7 +118,7 @@ export function useEngine(onMessage: (message: EngineMessage) => void) {
 
   return {
     state,
-    run: useCallback((code: string) => send({ type: "execute", code }), [send]),
+    run: useCallback((code: string, cwd = "") => send({ type: "execute", code, cwd }), [send]),
     interrupt: useCallback(() => send({ type: "interrupt" }), [send]),
     restart: useCallback(() => send({ type: "restart" }), [send]),
   };
